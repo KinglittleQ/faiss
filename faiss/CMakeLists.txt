@@ -10,6 +10,7 @@ set(FAISS_SRC
   IVFlib.cpp
   Index.cpp
   Index2Layer.cpp
+  IndexAQFastScan.cpp
   IndexBinary.cpp
   IndexBinaryFlat.cpp
   IndexBinaryFromFloat.cpp
@@ -83,6 +84,7 @@ set(FAISS_HEADERS
   IVFlib.h
   Index.h
   Index2Layer.h
+  IndexAQFastScan.h
   IndexBinary.h
   IndexBinaryFlat.h
   IndexBinaryFromFloat.h
