@@ -110,8 +110,6 @@ namespace faiss {
 LSQTimer lsq_timer;
 
 LocalSearchQuantizer::LocalSearchQuantizer(size_t d, size_t M, size_t nbits) {
-    FAISS_THROW_IF_NOT((M * nbits) % 8 == 0);
-
     this->d = d;
     this->M = M;
     this->nbits = std::vector<size_t>(M, nbits);
@@ -134,7 +132,7 @@ LocalSearchQuantizer::LocalSearchQuantizer(size_t d, size_t M, size_t nbits) {
     lambd = 1e-2f;
 
     chunk_size = 10000;
-    nperts = 4;
+    nperts = std::min(size_t(4), M);
 
     random_seed = 0x12345;
     std::srand(random_seed);
@@ -209,7 +207,11 @@ void LocalSearchQuantizer::train(size_t n, const float* x) {
         }
 
         // refine codes
-        icm_encode(x, codes.data(), n, train_ils_iters, gen);
+        if (encode_type == 0) {
+            icm_encode(x, codes.data(), n, train_ils_iters, gen);
+        } else {
+            bruteforce_encode(x, codes.data(), n);
+        }
 
         if (verbose) {
             float obj = evaluate(codes.data(), x, n);
@@ -268,7 +270,12 @@ void LocalSearchQuantizer::compute_codes(
     std::mt19937 gen(random_seed);
     random_int32(codes, 0, K - 1, gen);
 
-    icm_encode(x, codes.data(), n, encode_ils_iters, gen);
+    if (encode_type == 0) {
+        icm_encode(x, codes.data(), n, encode_ils_iters, gen);
+    } else {
+        bruteforce_encode(x, codes.data(), n);
+    }
+
     pack_codes(n, codes.data(), codes_out);
 
     if (verbose) {
@@ -321,6 +328,14 @@ void LocalSearchQuantizer::update_codebooks(
         }
     }
 
+    // for (int i = 0; i < M * K; i++) {
+    //     printf("row %d: ", i);
+    //     for (int j = 0; j < M * K; j++) {
+    //         printf("%4.0lf ", bb[i * (M * K) + j]);
+    //     }
+    //     printf("\n");
+    // }
+
     // add a regularization term to B'B
     for (int64_t i = 0; i < M * K; i++) {
         bb[i * (M * K) + i] += lambd;
@@ -365,6 +380,13 @@ void LocalSearchQuantizer::update_codebooks(
            &nrows_A); // nrows of output
 
     lsq_timer.end("update_codebooks");
+
+    // for (int i = 0; i < M; i++) {
+    //     for (int j = 0; j < K; j++) {
+    //         printf("%lf ", codebooks[i * K + j]);
+    //     }
+    //     printf("\n");
+    // }
 }
 
 /** encode using iterative conditional mode
@@ -644,6 +666,43 @@ float LocalSearchQuantizer::evaluate(
     obj = obj / n;
     return obj;
 }
+
+
+void LocalSearchQuantizer::bruteforce_encode(
+            const float* x,
+            int32_t* codes,
+            size_t n) const {
+    
+    std::vector<int32_t> best_codes(n * M);
+    std::vector<float> best_objs(n, HUGE_VALF);
+    std::vector<float> objs(n);
+    std::vector<int32_t> code(M, 0);
+
+    size_t ntotal = (1 << tot_bits);
+    for (size_t i = 0; i < ntotal; i++) {
+        size_t index = i;
+        for (size_t m = 0; m < M; m++) {
+            code[m] = index & ((1 << nbits[m]) - 1);
+            index = index >> nbits[m];
+        }
+
+        for (size_t j = 0; j < n; j++) {
+            memcpy(codes + j * M, code.data(), M * sizeof(code[0]));
+        }
+        evaluate(codes, x, n, objs.data());
+
+        for (size_t j = 0; j < n; j++) {
+            if (objs[j] < best_objs[j]) {
+                best_objs[j] = objs[j];
+                memcpy(best_codes.data() + j * M, code.data(), M * sizeof(code[0]));
+                // printf("%zd: code[0]=%d, code[1]=%d, obj=%lf\n", j, code[0], code[1], objs[j]);
+            }
+        }
+    }
+
+    memcpy(codes, best_codes.data(), n * M * sizeof(*codes));
+}
+
 
 double LSQTimer::get(const std::string& name) {
     return duration[name];

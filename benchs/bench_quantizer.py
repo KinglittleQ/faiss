@@ -6,6 +6,7 @@
 import sys
 import faiss
 import time
+import numpy as np
 
 try:
     from faiss.contrib.datasets_fb import DatasetSIFT1M
@@ -62,3 +63,30 @@ if 'rq' in todo:
     rq.train_type = faiss.ResidualQuantizer.Train_default
     rq.verbose = True
     eval_quantizer(rq, xb, xt, 'rq')
+
+if 'lsq-scalar' in todo:
+    lsq = faiss.LocalSearchQuantizer(1, 2, 4)
+    lsq.verbose = True  # show detailed training progress
+    lsq.lambd = 0.01
+    lsq.encode_type = 1
+    lsq.train_iters = 25
+    # lsq.nperts = 2
+    xb_norm = np.sum(xb ** 2, axis=1, keepdims=True)
+    xt_norm = np.sum(xt ** 2, axis=1, keepdims=True)
+    mean = np.mean(xt_norm)
+    print(mean)
+    eval_quantizer(lsq, xb_norm - mean, xt_norm - mean, 'lsq')
+
+if 'pq-scalar' in todo:
+    pq = faiss.ProductQuantizer(1, 1, 8)
+    xb_norm = np.sum(xb ** 2, axis=1, keepdims=True)
+    xt_norm = np.sum(xt ** 2, axis=1, keepdims=True)
+    mean = np.mean(xt_norm)
+    eval_quantizer(pq, xb_norm - mean, xt_norm - mean, 'pq')
+
+if 'rq-scalar' in todo:
+    rq = faiss.ResidualQuantizer(1, 2, 4)
+    xb_norm = np.sum(xb ** 2, axis=1, keepdims=True)
+    xt_norm = np.sum(xt ** 2, axis=1, keepdims=True)
+    mean = np.mean(xt_norm)
+    eval_quantizer(rq, xb_norm - mean, xt_norm - mean, 'rq')
