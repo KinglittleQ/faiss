@@ -235,7 +235,7 @@ void IndexAQFastScan::search_dispatch_implem(
         // float_maxheap_array_t res = {size_t(n), size_t(k), labels, distances};
         // aq->search(x, n, orig_codes, ntotal, &res, true);
     } else if (implem == 2 || implem == 3 || implem == 4) {
-        // FAISS_THROW_IF_NOT(orig_codes);
+        FAISS_THROW_IF_NOT(!orig_codes.empty());
         FAISS_THROW_IF_NOT_MSG(!is_max, "L2 is not implemented yet.");
 
         size_t dim12 = ksub * aq->M;
