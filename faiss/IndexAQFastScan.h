@@ -26,7 +26,10 @@ namespace faiss {
  */
 
 struct IndexAQFastScan : Index {
-    AdditiveQuantizer *aq;
+    AdditiveQuantizer* aq;
+
+    // quantizer for norms
+    AdditiveQuantizer* norm_aq;
 
     // implementation to select
     int implem = 0;
@@ -37,11 +40,16 @@ struct IndexAQFastScan : Index {
     int bbs;     // set at build time
     int qbs = 0; // query block size 0 = use default
 
+    size_t M;
+    size_t nbits;
+    size_t ksub;
+    size_t code_size;
+
     // packed version of the codes
     size_t ntotal2;
     size_t M2;
 
-    size_t ksub;
+    float mean_norm = 0;
 
     AlignedTable<uint8_t> codes;
 
@@ -49,8 +57,14 @@ struct IndexAQFastScan : Index {
     std::vector<uint8_t> orig_codes;
 
     IndexAQFastScan(
-            AdditiveQuantizer *aq,
+            AdditiveQuantizer* aq,
+            AdditiveQuantizer* norm_aq,
             MetricType metric = METRIC_L2,
+            int bbs = 32);
+
+    IndexAQFastScan(
+            AdditiveQuantizer* aq,
+            MetricType metric = METRIC_INNER_PRODUCT,
             int bbs = 32);
 
     IndexAQFastScan();
@@ -110,6 +124,10 @@ struct IndexAQFastScan : Index {
             float* distances,
             idx_t* labels,
             int impl) const;
+
+    void compute_codes(uint8_t* tmp_codes, idx_t n, const float* x) const;
+
+    void compute_LUT(float* lut, idx_t n, const float* x) const;
 };
 
 struct AQFastScanStats {

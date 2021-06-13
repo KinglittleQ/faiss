@@ -11,88 +11,89 @@ import numpy as np
 import faiss
 
 from faiss.contrib import datasets
-import platform
 
 
-class TestCompileOptions(unittest.TestCase):
-
-    def test_compile_options(self):
-        options = faiss.get_compile_options()
-        options = options.split(' ')
-        for option in options:
-            assert option in ['AVX2', 'NEON', 'GENERIC', 'OPTIMIZE']
+sp = faiss.swig_ptr
 
 
-class TestSearch(unittest.TestCase):
 
-    def test_PQ4_accuracy(self):
+def compute_LUT_IP_ref(xq, codebooks, alpha=1.0):
+    M, ksub, d = codebooks.shape
+    codebooks = codebooks.reshape((-1, d))
+    lut = alpha * xq.dot(codebooks.T)  # [n, M * ksub]
+    lut = lut.reshape((-1, M, ksub))
+    return lut
+
+
+def compute_LUT_L2_ref(xq, codebooks, norm_codebooks):
+    M1, ksub, d = codebooks.shape
+    M2 = norm_codebooks.shape[0]
+    nq = xq.shape[0]
+
+    lut0 = compute_LUT_IP_ref(xq, codebooks, -2.0)  # [n, M1, ksub]
+    lut1 = np.repeat(norm_codebooks[np.newaxis, :, :], nq, axis=0)  # [n, M2, ksub]
+    lut = np.concatenate((lut0, lut1), axis=1)
+    return lut
+
+
+class TestComponents(unittest.TestCase):
+
+    def __init__(self, *args, **kwargs):
+        unittest.TestCase.__init__(self, *args, **kwargs)
         d = 32
         M, nbits = 16, 4
-        ds  = datasets.SyntheticDataset(d, 2000, 5000, 1000)
+        ds = datasets.SyntheticDataset(d, 2000, 5000, 1000)
+        self.d = d
+        self.M = M
+        self.nbits = nbits
+        self.ds = ds
+        self.xt = ds.get_train()
+        self.xb = ds.get_database()
+        self.xq = ds.get_queries()
 
-        index_gt = faiss.IndexFlatIP(d)
-        index_gt.add(ds.get_database())
-        Dref, Iref = index_gt.search(ds.get_queries(), 10)
+    def test_compute_lut_IP(self):
+        d, M, nbits = self.d, self.M, self.nbits
+        ksub = (1 << nbits)
+        xt, xb, xq = self.xt, self.xb, self.xq
+        nt, nb, nq = xt.shape[0], xb.shape[0], xq.shape[0]
 
-        lsq = faiss.LocalSearchQuantizer(d, M, nbits)
-        lsq.lambd = 0.01
-        index = faiss.IndexAQFastScan(lsq, faiss.METRIC_INNER_PRODUCT)
-        index.implem = 4
-        index.aq.verbose = False
-        index.train(ds.get_train())
-        index.add(ds.get_database())
-        Da, Ia = index.search(ds.get_queries(), 10)
+        aq = faiss.LocalSearchQuantizer(d, M, nbits)
+        aq.lambd = 0.1
+        index = faiss.IndexAQFastScan(aq, faiss.METRIC_INNER_PRODUCT)
+        index.train(xt)
 
-        nq = Iref.shape[0]
-        recall_a = (Iref[:, 0] == Ia[:, 0]).sum() / nq
-        print(f'recall@1 = {recall_a:.3f}')
+        lut = np.zeros((nq, M, ksub), dtype=np.float32)
+        index.compute_LUT(sp(lut), nq, sp(xq))
 
-        index2 = faiss.IndexPQFastScan(d, M, nbits, faiss.METRIC_INNER_PRODUCT)
-        index2.implem = 12
-        index2.train(ds.get_train())
-        index2.add(ds.get_database())
-        Db, Ib = index2.search(ds.get_queries(), 10)
+        # ref
+        codebooks = faiss.vector_to_array(aq.codebooks)
+        codebooks = codebooks.reshape((M, ksub, d))
+        lut_ref = compute_LUT_IP_ref(xq, codebooks)
 
-        nq = Iref.shape[0]
-        recall_b = (Iref[:, 0] == Ib[:, 0]).sum() / nq
-        print(f'recall@1 = {recall_b:.3f}')
+        np.testing.assert_allclose(lut, lut_ref, rtol=1e-6)
 
-        assert recall_a > recall_b
+    def test_compute_lut_L2(self):
+        d, M, nbits = self.d, self.M, self.nbits
+        ksub = (1 << nbits)
+        xt, xb, xq = self.xt, self.xb, self.xq
+        nt, nb, nq = xt.shape[0], xb.shape[0], xq.shape[0]
 
+        aq = faiss.LocalSearchQuantizer(d, M - 2, nbits)
+        aq.lambd = 0.1
+        norm_aq = faiss.LocalSearchQuantizer(1, 2, nbits)
+        norm_aq.lambd = 0.1
+        norm_aq.encode_type = 1
+        index = faiss.IndexAQFastScan(aq, faiss.METRIC_L2, 32, norm_aq)
+        index.train(xt)
 
-    def test_scalar_quantization(self):
-        d = 1
-        M, nbits = 1, 4
-        ds  = datasets.SyntheticDataset(d, 2000, 5000, 100)
+        lut = np.zeros((nq, M, ksub), dtype=np.float32)
+        index.compute_LUT(sp(lut), nq, sp(xq))
 
-        index_gt = faiss.IndexFlatIP(d)
-        index_gt.add(ds.get_database())
-        Dref, Iref = index_gt.search(ds.get_queries(), 10)
+        # ref
+        codebooks = faiss.vector_to_array(aq.codebooks)
+        codebooks = codebooks.reshape((M - 2, ksub, d))
+        norm_codebooks = faiss.vector_to_array(norm_aq.codebooks)
+        norm_codebooks = norm_codebooks.reshape((2, ksub))
+        lut_ref = compute_LUT_L2_ref(xq, codebooks, norm_codebooks)
 
-        lsq = faiss.LocalSearchQuantizer(d, M, nbits)
-        lsq.lambd = 0.01
-        index = faiss.IndexAQFastScan(lsq, faiss.METRIC_INNER_PRODUCT)
-        index.implem = 4
-        index.aq.verbose = True
-        index.train(ds.get_train())
-        index.add(ds.get_database())
-        Da, Ia = index.search(ds.get_queries(), 10)
-
-        nq = Iref.shape[0]
-        recall_a = (Iref[:, 0] == Ia[:, 0]).sum() / nq
-        print(f'recall@1 = {recall_a:.3f}')
-
-        print(Dref)
-        print(Da)
-
-        # index2 = faiss.IndexPQFastScan(d, M, nbits, faiss.METRIC_INNER_PRODUCT)
-        # index2.implem = 12
-        # index2.train(ds.get_train())
-        # index2.add(ds.get_database())
-        # Db, Ib = index2.search(ds.get_queries(), 10)
-
-        # nq = Iref.shape[0]
-        # recall_b = (Iref[:, 0] == Ib[:, 0]).sum() / nq
-        # print(f'recall@1 = {recall_b:.3f}')
-
-        # assert recall_a > recall_b
+        np.testing.assert_allclose(lut, lut_ref, rtol=1e-6)

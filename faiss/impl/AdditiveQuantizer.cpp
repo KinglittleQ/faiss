@@ -151,21 +151,22 @@ void AdditiveQuantizer::decode_64bit(idx_t bits, float* xi) const {
     }
 }
 
-void AdditiveQuantizer::compute_LUT(size_t n, const float* xq, float* LUT)
+void AdditiveQuantizer::compute_LUT(size_t n, const float* xq, float* LUT, float alpha)
         const {
     // in all cases, it is large matrix multiplication
 
     FINTEGER ncenti = total_codebook_size;
     FINTEGER di = d;
     FINTEGER nqi = n;
-    float one = 1, zero = 0;
+    // float one = 1, zero = 0;
+    float zero = 0;
 
     sgemm_("Transposed",
            "Not transposed",
            &ncenti,
            &nqi,
            &di,
-           &one,
+           &alpha,
            codebooks.data(),
            &di,
            xq,

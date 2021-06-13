@@ -13,9 +13,13 @@
 
 #include <omp.h>
 
-#include <faiss/impl/ProductQuantizer.h>
-#include <faiss/impl/LocalSearchQuantizer.h>
 #include <faiss/impl/FaissAssert.h>
+#include <faiss/impl/LocalSearchQuantizer.h>
+#include <faiss/impl/ProductQuantizer.h>
+#include <faiss/impl/ResultHandler.h>
+#include <faiss/utils/distances.h>
+#include <faiss/utils/extra_distances.h>
+#include <faiss/utils/hamming.h>
 #include <faiss/utils/random.h>
 #include <faiss/utils/utils.h>
 
@@ -32,17 +36,52 @@ inline size_t roundup(size_t a, size_t b) {
 }
 
 IndexAQFastScan::IndexAQFastScan(
-        AdditiveQuantizer *aq,
+        AdditiveQuantizer* aq,
+        AdditiveQuantizer* norm_aq,
         MetricType metric,
         int bbs)
         : Index(aq->d, metric),
           aq(aq),
+          norm_aq(norm_aq),
           bbs(bbs),
-          ntotal2(0),
-          M2(roundup(aq->M, 2)) {
+          nbits(aq->nbits[0]),
+          ksub(1 << nbits),
+          ntotal2(0) {
     FAISS_THROW_IF_NOT(aq->nbits[0] == 4);
+    FAISS_THROW_IF_NOT(!(metric_type == METRIC_L2 && norm_aq == nullptr));
+
+    if (metric_type == METRIC_L2) {
+        FAISS_THROW_IF_NOT(aq->M % 2 == 0);
+        FAISS_THROW_IF_NOT(norm_aq->M % 2 == 0);
+        M = aq->M + norm_aq->M;
+        code_size = aq->code_size + norm_aq->code_size;
+    } else {
+        M = aq->M;
+        code_size = aq->code_size;
+    }
+    M2 = roundup(M, 2);
+
     is_trained = false;
-    ksub = (1 << aq->nbits[0]);
+}
+
+IndexAQFastScan::IndexAQFastScan(
+        AdditiveQuantizer* aq,
+        MetricType metric,
+        int bbs)
+        : Index(aq->d, metric),
+          aq(aq),
+          norm_aq(nullptr),
+          bbs(bbs),
+          M(aq->M),
+          nbits(aq->nbits[0]),
+          ksub(1 << nbits),
+          code_size(aq->code_size),
+          ntotal2(0),
+          M2(roundup(M, 2)) {
+    FAISS_THROW_IF_NOT(aq->nbits[0] == 4);
+    FAISS_THROW_IF_NOT(metric_type == METRIC_INNER_PRODUCT);
+
+    is_trained = false;
 }
 
 IndexAQFastScan::IndexAQFastScan() : bbs(0), ntotal2(0), M2(0) {}
@@ -69,7 +108,8 @@ IndexAQFastScan::~IndexAQFastScan() {}
 //     codes.resize(ntotal2 * M2 / 2);
 
 //     // printf("M=%d M2=%d code_size=%d\n", M, M2, aq->code_size);
-//     pq4_pack_codes(orig.codes.data(), ntotal, M, ntotal2, bbs, M2, codes.get());
+//     pq4_pack_codes(orig.codes.data(), ntotal, M, ntotal2, bbs, M2,
+//     codes.get());
 // }
 
 void IndexAQFastScan::train(idx_t n, const float* x) {
@@ -77,26 +117,94 @@ void IndexAQFastScan::train(idx_t n, const float* x) {
         return;
     }
     aq->train(n, x);
+
+    if (metric_type == METRIC_L2) {
+        // NOTE: We should quantize the norm of reconstructed vectors
+        // rather than the norm of original vectors!!!
+        std::vector<float> decoded_x(n * d);
+        std::vector<uint8_t> x_codes(n * aq->code_size);
+        aq->compute_codes(x, x_codes.data(), n);
+        aq->decode(x_codes.data(), decoded_x.data(), n);
+
+        std::vector<float> norms(n, 0);
+        fvec_norms_L2sqr(norms.data(), decoded_x.data(), d, n);
+        mean_norm = 0;
+        for (const auto& norm : norms) {
+            mean_norm += norm;
+        }
+        mean_norm /= n;
+        for (auto& norm : norms) {
+            norm -= mean_norm;
+        }
+
+        norm_aq->train(n, norms.data());
+    }
+
     is_trained = true;
 }
 
 void IndexAQFastScan::add(idx_t n, const float* x) {
     FAISS_THROW_IF_NOT(is_trained);
-    AlignedTable<uint8_t> tmp_codes(n * aq->code_size);
-    aq->compute_codes(x, tmp_codes.get(), n);
+
+    AlignedTable<uint8_t> tmp_codes(n * code_size);
+    compute_codes(tmp_codes.get(), n, x);
+
     ntotal2 = roundup(ntotal + n, bbs);
-    size_t new_size = ntotal2 * M2 / 2;
+    size_t new_size = ntotal2 * M2 / 2; // assume nbits = 4
     size_t old_size = codes.size();
     if (new_size > old_size) {
         codes.resize(new_size);
         memset(codes.get() + old_size, 0, new_size - old_size);
     }
+
     pq4_pack_codes_range(
-            tmp_codes.get(), aq->M, ntotal, ntotal + n, bbs, M2, codes.get());
+            tmp_codes.get(), M, ntotal, ntotal + n, bbs, M2, codes.get());
+
     ntotal += n;
 
-    orig_codes.resize(n * aq->code_size);
-    memcpy(orig_codes.data(), tmp_codes.get(), sizeof(uint8_t) * orig_codes.size());
+    if (implem == 0x22) {
+        orig_codes.resize(n * code_size);
+        memcpy(orig_codes.data(),
+               tmp_codes.get(),
+               sizeof(uint8_t) * orig_codes.size());
+    }
+}
+
+void IndexAQFastScan::compute_codes(uint8_t* tmp_codes, idx_t n, const float* x)
+        const {
+    if (metric_type == METRIC_INNER_PRODUCT) {
+        aq->compute_codes(x, tmp_codes, n);
+    } else {
+        // encode vectors
+        std::vector<uint8_t> x_codes(n * aq->code_size);
+        aq->compute_codes(x, x_codes.data(), n);
+
+        // encode norms
+        std::vector<float> norms(n, 0);
+        std::vector<float> decoded_x(n * d);
+
+        aq->decode(x_codes.data(), decoded_x.data(), n);
+        fvec_norms_L2sqr(norms.data(), decoded_x.data(), d, n);
+
+        for (auto& norm : norms) {
+            norm -= mean_norm;
+        }
+
+        std::vector<uint8_t> norm_codes(n * norm_aq->code_size);
+        norm_aq->compute_codes(norms.data(), norm_codes.data(), n);
+
+        // combine
+        for (idx_t i = 0; i < n; i++) {
+            memcpy(tmp_codes,
+                   x_codes.data() + i * aq->code_size,
+                   aq->code_size * sizeof(*tmp_codes));
+            tmp_codes += aq->code_size;
+            memcpy(tmp_codes,
+                   norm_codes.data() + i * norm_aq->code_size,
+                   norm_aq->code_size * sizeof(*tmp_codes));
+            tmp_codes += norm_aq->code_size;
+        }
+    }
 }
 
 void IndexAQFastScan::reset() {
@@ -109,8 +217,7 @@ namespace {
 // from impl/ProductQuantizer.cpp
 template <class C, typename dis_t>
 void aq_estimators_from_tables_generic(
-        const AdditiveQuantizer& aq,
-        size_t nbits,
+        const IndexAQFastScan& index,
         const uint8_t* codes,
         size_t ncodes,
         const dis_t* dis_table,
@@ -118,23 +225,46 @@ void aq_estimators_from_tables_generic(
         typename C::T* heap_dis,
         int64_t* heap_ids) {
     using accu_t = typename C::T;
-    const size_t M = aq.M;
-    const size_t ksub = (1 << nbits);
 
     for (size_t j = 0; j < ncodes; ++j) {
-        PQDecoderGeneric decoder(codes + j * aq.code_size, nbits);
+        BitstringReader bsr(codes + j * index.code_size, index.code_size);
         accu_t dis = 0;
         const dis_t* __restrict dt = dis_table;
-        for (size_t m = 0; m < M; m++) {
-            uint64_t c = decoder.decode();
+        for (size_t m = 0; m < index.M; m++) {
+            uint64_t c = bsr.read(index.nbits);
             dis += dt[c];
-            dt += ksub;
+            dt += index.ksub;
         }
 
         if (C::cmp(heap_dis[0], dis)) {
             heap_pop<C>(k, heap_dis, heap_ids);
             heap_push<C>(k, heap_dis, heap_ids, dis, j);
         }
+    }
+}
+
+template <class VectorDistance, class ResultHandler>
+void search_with_decompress(
+        const IndexAQFastScan& index,
+        size_t ntotal,
+        const float* xq,
+        VectorDistance& vd,
+        ResultHandler& res) {
+    using SingleResultHandler = typename ResultHandler::SingleResultHandler;
+    const uint8_t* codes = index.orig_codes.data();
+
+#pragma omp parallel for
+    for (int64_t q = 0; q < res.nq; q++) {
+        SingleResultHandler resi(res);
+        resi.begin(q);
+        std::vector<float> tmp(index.d);
+        const float* x = xq + index.d * q;
+        for (size_t i = 0; i < ntotal; i++) {
+            index.aq->decode(codes + i * index.code_size, tmp.data(), 1);
+            float dis = vd(x, tmp.data());
+            resi.add_result(dis, i);
+        }
+        resi.end();
     }
 }
 
@@ -147,19 +277,14 @@ void IndexAQFastScan::compute_quantized_LUT(
         const float* x,
         uint8_t* lut,
         float* normalizers) const {
-    size_t dim12 = ksub * aq->M;
+    size_t dim12 = ksub * M;
     std::unique_ptr<float[]> dis_tables(new float[n * dim12]);
-    if (metric_type == METRIC_L2) {
-        FAISS_THROW_MSG("L2 is not implemented yet.");
-        aq->compute_LUT(n, x, dis_tables.get());
-    } else {
-        aq->compute_LUT(n, x, dis_tables.get());
-    }
+    compute_LUT(dis_tables.get(), n, x);
 
     for (uint64_t i = 0; i < n; i++) {
         round_uint8_per_column(
                 dis_tables.get() + i * dim12,
-                aq->M,
+                M,
                 ksub,
                 &normalizers[2 * i],
                 &normalizers[2 * i + 1]);
@@ -172,7 +297,7 @@ void IndexAQFastScan::compute_quantized_LUT(
         for (int j = 0; j < dim12; j++) {
             t_out[j] = int(t_in[j]);
         }
-        memset(t_out + dim12, 0, (M2 - aq->M) * ksub);
+        memset(t_out + dim12, 0, (M2 - M) * ksub);
     }
 }
 
@@ -188,8 +313,22 @@ void IndexAQFastScan::search(
         idx_t* labels) const {
     FAISS_THROW_IF_NOT(k > 0);
 
+    if (implem == 0x22) {
+        if (metric_type == METRIC_L2) {
+            using VD = VectorDistance<METRIC_L2>;
+            VD vd = {size_t(d), metric_arg};
+            HeapResultHandler<VD::C> rh(n, distances, labels, k);
+            search_with_decompress(*this, ntotal, x, vd, rh);
+        } else {
+            using VD = VectorDistance<METRIC_INNER_PRODUCT>;
+            VD vd = {size_t(d), metric_arg};
+            HeapResultHandler<VD::C> rh(n, distances, labels, k);
+            search_with_decompress(*this, ntotal, x, vd, rh);
+        }
+        return;
+    }
+
     if (metric_type == METRIC_L2) {
-        FAISS_THROW_MSG("L2 is not implemented yet.");
         search_dispatch_implem<true>(n, x, k, distances, labels);
     } else {
         search_dispatch_implem<false>(n, x, k, distances, labels);
@@ -230,21 +369,17 @@ void IndexAQFastScan::search_dispatch_implem(
     }
 
     if (implem == 1) {
+        FAISS_THROW_MSG("Not implemented yet.");
         // FAISS_THROW_IF_NOT(orig_codes);
         // FAISS_THROW_IF_NOT(is_max);
-        // float_maxheap_array_t res = {size_t(n), size_t(k), labels, distances};
-        // aq->search(x, n, orig_codes, ntotal, &res, true);
+        // float_maxheap_array_t res = {size_t(n), size_t(k), labels,
+        // distances}; aq->search(x, n, orig_codes, ntotal, &res, true);
     } else if (implem == 2 || implem == 3 || implem == 4) {
         FAISS_THROW_IF_NOT(!orig_codes.empty());
-        FAISS_THROW_IF_NOT_MSG(!is_max, "L2 is not implemented yet.");
 
-        size_t dim12 = ksub * aq->M;
+        const size_t dim12 = ksub * M;
         std::unique_ptr<float[]> dis_tables(new float[n * dim12]);
-        if (is_max) {
-            aq->compute_LUT(n, x, dis_tables.get());
-        } else {
-            aq->compute_LUT(n, x, dis_tables.get());
-        }
+        compute_LUT(dis_tables.get(), n, x);
 
         std::vector<float> normalizers(n * 2);
 
@@ -254,7 +389,7 @@ void IndexAQFastScan::search_dispatch_implem(
             for (uint64_t i = 0; i < n; i++) {
                 round_uint8_per_column(
                         dis_tables.get() + i * dim12,
-                        aq->M,
+                        M,
                         ksub,
                         &normalizers[2 * i],
                         &normalizers[2 * i + 1]);
@@ -268,8 +403,7 @@ void IndexAQFastScan::search_dispatch_implem(
             heap_heapify<Cfloat>(k, heap_dis, heap_ids);
 
             aq_estimators_from_tables_generic<Cfloat>(
-                    *aq,
-                    aq->nbits[0],
+                    *this,
                     orig_codes.data(),
                     ntotal,
                     dis_tables.get() + i * dim12,
@@ -316,6 +450,30 @@ void IndexAQFastScan::search_dispatch_implem(
         }
     } else {
         FAISS_THROW_FMT("invalid implem %d impl=%d", implem, impl);
+    }
+}
+
+void IndexAQFastScan::compute_LUT(float* lut, idx_t n, const float* x) const {
+    if (metric_type == METRIC_INNER_PRODUCT) {
+        aq->compute_LUT(n, x, lut, 1.0f);
+    } else {
+        // compute inner product look-up tables
+        const size_t ip_dim12 = aq->M * ksub;
+        const size_t norm_dim12 = norm_aq->M * ksub;
+        std::vector<float> ip_lut(n * ip_dim12);
+        aq->compute_LUT(n, x, ip_lut.data(), -2.0f);
+
+        // norm look-up tables
+        const float* norm_lut = norm_aq->codebooks.data();
+        FAISS_THROW_IF_NOT(norm_aq->codebooks.size() == norm_dim12);
+
+        // combine them
+        for (idx_t i = 0; i < n; i++) {
+            memcpy(lut, ip_lut.data() + i * ip_dim12, ip_dim12 * sizeof(*lut));
+            lut += ip_dim12;
+            memcpy(lut, norm_lut, norm_dim12 * sizeof(*lut));
+            lut += norm_dim12;
+        }
     }
 }
 

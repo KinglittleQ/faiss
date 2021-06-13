@@ -279,6 +279,8 @@ void LocalSearchQuantizer::compute_codes(
     pack_codes(n, codes.data(), codes_out);
 
     if (verbose) {
+        float obj = evaluate(codes.data(), x, n);
+        printf("Final obj = %lf\n", obj);
         lsq_timer.end("encode");
         double t = lsq_timer.get("encode");
         printf("Time to encode %zd vectors: %lf s\n", n, t);
@@ -695,7 +697,6 @@ void LocalSearchQuantizer::bruteforce_encode(
             if (objs[j] < best_objs[j]) {
                 best_objs[j] = objs[j];
                 memcpy(best_codes.data() + j * M, code.data(), M * sizeof(code[0]));
-                // printf("%zd: code[0]=%d, code[1]=%d, obj=%lf\n", j, code[0], code[1], objs[j]);
             }
         }
     }
