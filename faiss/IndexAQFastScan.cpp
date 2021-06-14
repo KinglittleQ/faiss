@@ -51,10 +51,12 @@ IndexAQFastScan::IndexAQFastScan(
     FAISS_THROW_IF_NOT(!(metric_type == METRIC_L2 && norm_aq == nullptr));
 
     if (metric_type == METRIC_L2) {
-        FAISS_THROW_IF_NOT(aq->M % 2 == 0);
-        FAISS_THROW_IF_NOT(norm_aq->M % 2 == 0);
+        FAISS_THROW_IF_NOT(norm_aq->nbits[0] == 4);
+        // FAISS_THROW_IF_NOT(aq->M % 2 == 0);
+        // FAISS_THROW_IF_NOT(norm_aq->M % 2 == 0);
+        // code_size = aq->code_size + norm_aq->code_size;
         M = aq->M + norm_aq->M;
-        code_size = aq->code_size + norm_aq->code_size;
+        code_size = (M * nbits + 7) / 8;
     } else {
         M = aq->M;
         code_size = aq->code_size;
@@ -194,15 +196,23 @@ void IndexAQFastScan::compute_codes(uint8_t* tmp_codes, idx_t n, const float* x)
         norm_aq->compute_codes(norms.data(), norm_codes.data(), n);
 
         // combine
+#pragma omp parallel for if (n > 1000)
         for (idx_t i = 0; i < n; i++) {
-            memcpy(tmp_codes,
-                   x_codes.data() + i * aq->code_size,
-                   aq->code_size * sizeof(*tmp_codes));
-            tmp_codes += aq->code_size;
-            memcpy(tmp_codes,
-                   norm_codes.data() + i * norm_aq->code_size,
-                   norm_aq->code_size * sizeof(*tmp_codes));
-            tmp_codes += norm_aq->code_size;
+            BitstringReader bsr1(
+                    x_codes.data() + i * aq->code_size, aq->code_size);
+            BitstringReader bsr2(
+                    norm_codes.data() + i * norm_aq->code_size,
+                    norm_aq->code_size);
+            BitstringWriter bsw(tmp_codes + i * code_size, code_size);
+
+            for (size_t m = 0; m < aq->M; m++) {
+                int32_t c = bsr1.read(nbits);
+                bsw.write(c, nbits);
+            }
+            for (size_t m = 0; m < norm_aq->M; m++) {
+                int32_t c = bsr2.read(nbits);
+                bsw.write(c, nbits);
+            }
         }
     }
 }

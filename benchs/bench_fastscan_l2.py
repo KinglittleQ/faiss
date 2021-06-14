@@ -45,27 +45,47 @@ k = int(sys.argv[1])
 todo = sys.argv[2:]
 ds = DatasetSIFT1M()
 
-xq = ds.get_queries()[:1000]
+xq = ds.get_queries()
 xb = ds.get_database()
-gt = ds.get_groundtruth()[:1000]
+gt = ds.get_groundtruth()
 xt = ds.get_train()
 
 nb, d = xb.shape
 nq, d = xq.shape
 nt, d = xt.shape
 
-M = 16
+vec_M = 14
+norm_M = 2
+M = vec_M + norm_M
+
 nbits = 4
 
 
-if 'lsq' in todo:
-    lsq = faiss.LocalSearchQuantizer(d, M - 2, nbits)
+if 'lsq-lsq' in todo:
+    lsq = faiss.LocalSearchQuantizer(d, vec_M, nbits)
     lsq.lambd = 0.1
     lsq.verbose = True
 
-    norm_aq = faiss.LocalSearchQuantizer(1, 2, nbits)
-    norm_aq.lambd = 0.1
+    norm_aq = faiss.LocalSearchQuantizer(1, norm_M, nbits)
+    norm_aq.lambd = 0.01
+    norm_aq.train_iters = 10
     norm_aq.encode_type = 1
+    norm_aq.p = 0.1
+    norm_aq.verbose = True
+
+    index = faiss.IndexAQFastScan(lsq, norm_aq, faiss.METRIC_L2)
+    # index.implem = 0x22
+    index.implem = 12
+    index.train(xt)
+    index.add(xb)
+    evaluate(index)
+
+if 'lsq-rq' in todo:
+    lsq = faiss.LocalSearchQuantizer(d, vec_M, nbits)
+    lsq.lambd = 0.1
+    lsq.verbose = True
+
+    norm_aq = faiss.ResidualQuantizer(1, norm_M, nbits)
     norm_aq.verbose = True
 
     index = faiss.IndexAQFastScan(lsq, norm_aq, faiss.METRIC_L2)
@@ -85,22 +105,47 @@ if 'pq' in todo:
     eval_quantizer(index.pq, xb, xt, "pq")
     evaluate(index)
 
-if 'rq' in todo:
-    rq = faiss.ResidualQuantizer(d, M - 2, nbits)
+if 'rq-rq' in todo:
+    rq = faiss.ResidualQuantizer(d, vec_M, nbits)
     rq.verbose = True
 
-    norm_aq = faiss.ResidualQuantizer(1, 2, nbits)
+    norm_aq = faiss.ResidualQuantizer(1, norm_M, nbits)
     norm_aq.verbose = True
 
     index = faiss.IndexAQFastScan(rq, norm_aq, faiss.METRIC_L2)
-    index.implem = 2
+    index.implem = 12
+    index.train(xt)
+    index.add(xb)
+    evaluate(index)
+
+if 'rq-lsq' in todo:
+    rq = faiss.ResidualQuantizer(d, vec_M, nbits)
+    rq.verbose = True
+
+    norm_aq = faiss.LocalSearchQuantizer(1, norm_M, nbits)
+    norm_aq.lambd = 0.01
+    norm_aq.train_iters = 10
+    norm_aq.encode_type = 1
+    norm_aq.p = 0.1
+    norm_aq.verbose = True
+
+    index = faiss.IndexAQFastScan(rq, norm_aq, faiss.METRIC_L2)
+    index.implem = 12
     index.train(xt)
     index.add(xb)
     evaluate(index)
 
 if 'index-rq' in todo:
-    index = faiss.IndexResidual(d, M - 2, nbits)
+    index = faiss.IndexResidual(d, vec_M, nbits)
     index.verbose = True
     index.train(xt)
     index.add(xb)
+    evaluate(index)
+
+if 'pq-8' in todo:
+    index = faiss.IndexPQ(d, M // 2, nbits * 2, faiss.METRIC_L2)
+    index.train(xt)
+    index.add(xb)
+
+    eval_quantizer(index.pq, xb, xt, "pq-8")
     evaluate(index)
