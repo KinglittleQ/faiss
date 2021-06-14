@@ -164,7 +164,7 @@ void IndexAQFastScan::add(idx_t n, const float* x) {
 
     ntotal += n;
 
-    if (implem == 0x22) {
+    if (implem == 0x22 || implem == 2) {
         orig_codes.resize(n * code_size);
         memcpy(orig_codes.data(),
                tmp_codes.get(),
@@ -406,6 +406,7 @@ void IndexAQFastScan::search_dispatch_implem(
             }
         }
 
+#pragma omp parallel for if (n > 1000)
         for (int64_t i = 0; i < n; i++) {
             int64_t* heap_ids = labels + i * k;
             float* heap_dis = distances + i * k;
