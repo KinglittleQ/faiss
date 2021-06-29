@@ -52,9 +52,6 @@ IndexAQFastScan::IndexAQFastScan(
 
     if (metric_type == METRIC_L2) {
         FAISS_THROW_IF_NOT(norm_aq->nbits[0] == 4);
-        // FAISS_THROW_IF_NOT(aq->M % 2 == 0);
-        // FAISS_THROW_IF_NOT(norm_aq->M % 2 == 0);
-        // code_size = aq->code_size + norm_aq->code_size;
         M = aq->M + norm_aq->M;
         code_size = (M * nbits + 7) / 8;
     } else {
@@ -174,6 +171,29 @@ void IndexAQFastScan::add(idx_t n, const float* x) {
 
 void IndexAQFastScan::compute_codes(uint8_t* tmp_codes, idx_t n, const float* x)
         const {
+
+    if (n > chunk_size) {
+        bool aq_verbose = aq->verbose;
+        bool norm_verbose = norm_aq->verbose;
+        size_t n_chunks = (n + chunk_size - 1) / chunk_size;
+        for (size_t i = 0; i < n_chunks; i++) {
+            size_t ni = std::min(chunk_size, n - i * chunk_size);
+            if (aq_verbose) {
+                printf("\r\tencoding %zd/%zd ...", i * chunk_size + ni, n);
+                fflush(stdout);
+                if (i == n_chunks - 1 || i == 0) {
+                    printf("\n");
+                }
+            }
+            compute_codes(tmp_codes + i * chunk_size * code_size, ni, x + i * chunk_size * d);
+            aq->verbose = false;
+            norm_aq->verbose = false;
+        }
+        aq->verbose = aq_verbose;
+        norm_aq->verbose = norm_verbose;
+        return;
+    }
+
     if (metric_type == METRIC_INNER_PRODUCT) {
         aq->compute_codes(x, tmp_codes, n);
     } else {

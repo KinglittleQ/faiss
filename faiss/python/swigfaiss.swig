@@ -433,7 +433,7 @@ void gpu_sync_all_devices()
 %include  <faiss/IndexIVFPQR.h>
 %include  <faiss/Index2Layer.h>
 
-#include  <faiss/IndexAQFastScan.h>
+%include  <faiss/IndexAQFastScan.h>
 %include  <faiss/IndexPQFastScan.h>
 %include  <faiss/IndexIVFPQFastScan.h>
 %include  <faiss/utils/quantize_lut.h>

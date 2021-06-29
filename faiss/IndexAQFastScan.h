@@ -56,6 +56,8 @@ struct IndexAQFastScan : Index {
     // this is for testing purposes only (set when initialized by IndexAQ)
     std::vector<uint8_t> orig_codes;
 
+    size_t chunk_size = 10000;
+
     IndexAQFastScan(
             AdditiveQuantizer* aq,
             AdditiveQuantizer* norm_aq,
