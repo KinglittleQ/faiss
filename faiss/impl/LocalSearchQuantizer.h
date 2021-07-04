@@ -56,6 +56,8 @@ struct LocalSearchQuantizer : AdditiveQuantizer {
     char encode_type = 0;
     std::vector<float> vector_mean;
 
+    bool update_codebooks_with_double = true;
+
     LocalSearchQuantizer(
             size_t d,      /* dimensionality of the input vectors */
             size_t M,      /* number of subquantizers */

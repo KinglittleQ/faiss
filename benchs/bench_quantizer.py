@@ -51,7 +51,7 @@ nbits = 8
 
 if 'lsq' in todo:
     lsq = faiss.LocalSearchQuantizer(d, M, nbits)
-    lsq.verbose = True  # show detailed training progress
+    lsq.verbose = True
     eval_quantizer(lsq, xb, xt, 'lsq')
 
 if 'pq' in todo:
