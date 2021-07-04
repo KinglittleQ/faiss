@@ -56,6 +56,8 @@ struct LocalSearchQuantizer : AdditiveQuantizer {
     int random_seed; ///< seed for random generator
     size_t nperts;   ///< number of perturbation in each code
 
+    bool update_codebooks_with_double = true;
+
     LSQIcmEncoder* icm_encoder;
     LSQIcmEncoderFactory* icm_encoder_factory;
 
