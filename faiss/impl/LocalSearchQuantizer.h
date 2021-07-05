@@ -119,7 +119,6 @@ struct LocalSearchQuantizer : AdditiveQuantizer {
 
     bool update_codebooks_with_double = true;
 
-    lsq::IcmEncoder* icm_encoder;
     lsq::IcmEncoderFactory* icm_encoder_factory;
 
     LocalSearchQuantizer(
@@ -194,8 +193,6 @@ struct LocalSearchQuantizer : AdditiveQuantizer {
             const float* x,
             size_t n,
             float* objs = nullptr) const;
-
-    void set_icm_encoder();
 };
 
 /** A helper struct to count consuming time during training.
