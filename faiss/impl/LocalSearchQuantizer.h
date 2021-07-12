@@ -53,7 +53,7 @@ struct LocalSearchQuantizer : AdditiveQuantizer {
     int random_seed; ///< seed for random generator
     size_t nperts;   ///< number of perturbation in each code
 
-    char encode_type = 0;
+    char encode_type = 0; ///< 0 for icm, 1 for brute force
     std::vector<float> vector_mean;
 
     bool update_codebooks_with_double = true;
@@ -155,10 +155,7 @@ struct LocalSearchQuantizer : AdditiveQuantizer {
      * @param x      vectors to encode, size n * d
      * @param codes  output codes, size n * M
      */
-    void bruteforce_encode(
-            const float* x,
-            int32_t* codes,
-            size_t n) const;
+    void bruteforce_encode(const float* x, int32_t* codes, size_t n) const;
 };
 
 /** A helper struct to count consuming time during training.

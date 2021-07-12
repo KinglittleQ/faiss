@@ -776,12 +776,10 @@ float LocalSearchQuantizer::evaluate(
     return obj;
 }
 
-
 void LocalSearchQuantizer::bruteforce_encode(
-            const float* x,
-            int32_t* codes,
-            size_t n) const {
-    
+        const float* x,
+        int32_t* codes,
+        size_t n) const {
     std::vector<int32_t> best_codes(n * M);
     std::vector<float> best_objs(n, HUGE_VALF);
     std::vector<float> objs(n);
@@ -803,14 +801,15 @@ void LocalSearchQuantizer::bruteforce_encode(
         for (size_t j = 0; j < n; j++) {
             if (objs[j] < best_objs[j]) {
                 best_objs[j] = objs[j];
-                memcpy(best_codes.data() + j * M, code.data(), M * sizeof(code[0]));
+                memcpy(best_codes.data() + j * M,
+                       code.data(),
+                       M * sizeof(code[0]));
             }
         }
     }
 
     memcpy(codes, best_codes.data(), n * M * sizeof(*codes));
 }
-
 
 double LSQTimer::get(const std::string& name) {
     return duration[name];

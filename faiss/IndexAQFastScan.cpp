@@ -171,7 +171,6 @@ void IndexAQFastScan::add(idx_t n, const float* x) {
 
 void IndexAQFastScan::compute_codes(uint8_t* tmp_codes, idx_t n, const float* x)
         const {
-
     if (n > chunk_size) {
         bool aq_verbose = aq->verbose;
         bool norm_verbose = norm_aq->verbose;
@@ -185,7 +184,10 @@ void IndexAQFastScan::compute_codes(uint8_t* tmp_codes, idx_t n, const float* x)
                     printf("\n");
                 }
             }
-            compute_codes(tmp_codes + i * chunk_size * code_size, ni, x + i * chunk_size * d);
+            compute_codes(
+                    tmp_codes + i * chunk_size * code_size,
+                    ni,
+                    x + i * chunk_size * d);
             aq->verbose = false;
             norm_aq->verbose = false;
         }
