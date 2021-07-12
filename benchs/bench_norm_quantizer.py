@@ -20,12 +20,13 @@ def eval_codec(q, xb):
     return ((xb - decoded) ** 2).sum() / xb.shape[0], t1 - t0
 
 
-def eval_quantizer(q, xb, xt, name):
+def eval_quantizer(q, xb, xt, name, encode_type=0):
     t0 = time.time()
     q.train(xt)
     t1 = time.time()
     train_t = t1 - t0
 
+    q.encode_type = encode_type
     err, encode_t = eval_codec(q, xb)
 
     print(f'===== {name}:')
@@ -50,7 +51,7 @@ def evaluate(index):
 verbose = bool(int(sys.argv[1]))
 todo = sys.argv[2:]
 if len(todo) == 0:
-    todo = ['lsq-bf', 'lsq-icm', 'rq', 'pq']
+    todo = ['lsq-bf', 'lsq-icm', 'rq', 'pq-8']
 
 ds = DatasetSIFT1M()
 
@@ -68,6 +69,8 @@ if 'norm' in todo:
     q = faiss.LocalSearchQuantizer(d, M, nbits)
     q.lambd = 0.1
     q.verbose = True
+    ngpus = faiss.get_num_gpus()
+    q.icm_encoder_factory = faiss.GpuIcmEncoderFactory(ngpus)
     q.train(xt)
     codes = q.compute_codes(xt)
     decoded_xt = q.decode(codes)
@@ -78,31 +81,23 @@ else:
 xt_norm = np.sum(decoded_xt ** 2, axis=1, keepdims=True)  # [nb, 1]
 mean_norm = xt_norm.mean()
 
-xt_norm -= mean_norm
-
 print(mean_norm)
-print(xt_norm[:10])
 
 M = 2
 nbits = 4
 
 if 'lsq-bf' in todo:
     aq = faiss.LocalSearchQuantizer(1, M, nbits)
-    aq.lambd = 0.01
-    aq.train_iters = 10
     aq.encode_type = 1
-    aq.p = 0.1
     aq.verbose = verbose
-    eval_quantizer(aq, xt_norm, xt_norm, "lsq-brutefoce")
+    eval_quantizer(aq, xt_norm, xt_norm, "lsq-brutefoce", 1)
 
 if 'lsq-icm' in todo:
     aq = faiss.LocalSearchQuantizer(1, M, nbits)
-    aq.lambd = 0.01
-    aq.train_iters = 10
     aq.encode_type = 0
-    aq.p = 0.1
+    aq.encode_ils_iters = 32
     aq.verbose = verbose
-    eval_quantizer(aq, xt_norm, xt_norm, "lsq-icm")
+    eval_quantizer(aq, xt_norm, xt_norm, "lsq-icm", 1)
 
 if 'rq' in todo:
     aq = faiss.ResidualQuantizer(1, M, nbits)
@@ -113,4 +108,10 @@ if 'pq-8' in todo:
     pq = faiss.ProductQuantizer(1, 1, M * nbits)
     pq.cp.niter = 200
     pq.verbose = verbose
-    eval_quantizer(pq, xt_norm, xt_norm, "pq")
+    eval_quantizer(pq, xt_norm, xt_norm, "pq-8")
+
+if 'pq-8' in todo:
+    pq = faiss.ProductQuantizer(1, 1, nbits)
+    pq.cp.niter = 200
+    pq.verbose = verbose
+    eval_quantizer(pq, xt_norm, xt_norm, "pq-4")

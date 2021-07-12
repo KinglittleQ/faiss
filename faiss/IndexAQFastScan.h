@@ -49,8 +49,6 @@ struct IndexAQFastScan : Index {
     size_t ntotal2;
     size_t M2;
 
-    float mean_norm = 0;
-
     AlignedTable<uint8_t> codes;
 
     // this is for testing purposes only (set when initialized by IndexAQ)

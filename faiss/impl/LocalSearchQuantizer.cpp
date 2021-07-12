@@ -257,9 +257,9 @@ void LocalSearchQuantizer::train(size_t n, const float* x) {
 
         // refine codes
         if (encode_type == 0) {
-            icm_encode(x, codes.data(), n, train_ils_iters, gen);
+            icm_encode(codes.data(),x,  n, train_ils_iters, gen);
         } else {
-            bruteforce_encode(x, codes.data(), n);
+            bruteforce_encode(codes.data(), x, n);
         }
 
         if (verbose) {
@@ -319,9 +319,9 @@ void LocalSearchQuantizer::compute_codes(
     random_int32(codes, 0, K - 1, gen);
 
     if (encode_type == 0) {
-        icm_encode(x, codes.data(), n, encode_ils_iters, gen);
+        icm_encode(codes.data(), x, n, encode_ils_iters, gen);
     } else {
-        bruteforce_encode(x, codes.data(), n);
+        bruteforce_encode(codes.data(), x, n);
     }
 
     pack_codes(n, codes.data(), codes_out);
@@ -783,8 +783,8 @@ float LocalSearchQuantizer::evaluate(
 }
 
 void LocalSearchQuantizer::bruteforce_encode(
-        const float* x,
         int32_t* codes,
+        const float* x,
         size_t n) const {
     std::vector<int32_t> best_codes(n * M);
     std::vector<float> best_objs(n, HUGE_VALF);

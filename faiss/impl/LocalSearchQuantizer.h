@@ -59,7 +59,6 @@ struct LocalSearchQuantizer : AdditiveQuantizer {
     size_t nperts;   ///< number of perturbation in each code
 
     char encode_type = 0; ///< 0 for icm, 1 for brute force
-    std::vector<float> vector_mean;
 
     ///< if non-NULL, use this encoder to encode
     lsq::IcmEncoderFactory* icm_encoder_factory;
@@ -169,10 +168,10 @@ struct LocalSearchQuantizer : AdditiveQuantizer {
 
     /** Encode vectors given codebooks using brute force searching.
      *
-     * @param x      vectors to encode, size n * d
      * @param codes  output codes, size n * M
+     * @param x      vectors to encode, size n * d
      */
-    void bruteforce_encode(const float* x, int32_t* codes, size_t n) const;
+    void bruteforce_encode(int32_t* codes, const float* x, size_t n) const;
 };
 
 namespace lsq {

@@ -127,15 +127,6 @@ void IndexAQFastScan::train(idx_t n, const float* x) {
 
         std::vector<float> norms(n, 0);
         fvec_norms_L2sqr(norms.data(), decoded_x.data(), d, n);
-        mean_norm = 0;
-        for (const auto& norm : norms) {
-            mean_norm += norm;
-        }
-        mean_norm /= n;
-        for (auto& norm : norms) {
-            norm -= mean_norm;
-        }
-
         norm_aq->train(n, norms.data());
     }
 
@@ -209,10 +200,6 @@ void IndexAQFastScan::compute_codes(uint8_t* tmp_codes, idx_t n, const float* x)
 
         aq->decode(x_codes.data(), decoded_x.data(), n);
         fvec_norms_L2sqr(norms.data(), decoded_x.data(), d, n);
-
-        for (auto& norm : norms) {
-            norm -= mean_norm;
-        }
 
         std::vector<uint8_t> norm_codes(n * norm_aq->code_size);
         norm_aq->compute_codes(norms.data(), norm_codes.data(), n);
