@@ -19,6 +19,12 @@
 
 namespace faiss {
 
+namespace lsq {
+
+struct IcmEncoderFactory;
+
+} // namespace lsq
+
 /** Implementation of LSQ/LSQ++ described in the following two papers:
  *
  * Revisiting additive quantization
@@ -35,7 +41,6 @@ namespace faiss {
  * The trained codes are stored in `codebooks` which is called
  * `centroids` in PQ and RQ.
  */
-
 struct LocalSearchQuantizer : AdditiveQuantizer {
     size_t K; ///< number of codes per codebook
 
@@ -56,12 +61,17 @@ struct LocalSearchQuantizer : AdditiveQuantizer {
     char encode_type = 0; ///< 0 for icm, 1 for brute force
     std::vector<float> vector_mean;
 
+    ///< if non-NULL, use this encoder to encode
+    lsq::IcmEncoderFactory* icm_encoder_factory;
+
     bool update_codebooks_with_double = true;
 
     LocalSearchQuantizer(
             size_t d,      /* dimensionality of the input vectors */
             size_t M,      /* number of subquantizers */
             size_t nbits); /* number of bit per subvector index */
+
+    ~LocalSearchQuantizer();
 
     // Train the local search quantizer
     void train(size_t n, const float* x) override;
@@ -70,6 +80,7 @@ struct LocalSearchQuantizer : AdditiveQuantizer {
      *
      * @param x      vectors to encode, size n * d
      * @param codes  output codes, size n * code_size
+     * @param n      number of vectors
      */
     void compute_codes(const float* x, uint8_t* codes, size_t n) const override;
 
@@ -77,36 +88,46 @@ struct LocalSearchQuantizer : AdditiveQuantizer {
      *
      * @param x      training vectors, size n * d
      * @param codes  encoded training vectors, size n * M
+     * @param n      number of vectors
      */
     void update_codebooks(const float* x, const int32_t* codes, size_t n);
 
     /** Encode vectors given codebooks using iterative conditional mode (icm).
      *
-     * @param x      vectors to encode, size n * d
-     * @param codes  output codes, size n * M
+     * @param codes     output codes, size n * M
+     * @param x         vectors to encode, size n * d
+     * @param n         number of vectors
      * @param ils_iters number of iterations of iterative local search
      */
     void icm_encode(
-            const float* x,
             int32_t* codes,
+            const float* x,
             size_t n,
             size_t ils_iters,
             std::mt19937& gen) const;
 
-    void icm_encode_partial(
-            size_t index,
-            const float* x,
+    void icm_encode_impl(
             int32_t* codes,
+            const float* x,
+            const float* unaries,
+            std::mt19937& gen,
             size_t n,
-            const float* binaries,
             size_t ils_iters,
-            std::mt19937& gen) const;
+            bool verbose) const;
 
     void icm_encode_step(
+            int32_t* codes,
             const float* unaries,
             const float* binaries,
-            int32_t* codes,
-            size_t n) const;
+            size_t n,
+            size_t n_iters) const;
+
+    /** Add some perturbation to codes
+     *
+     * @param codes codes to be perturbed, size n * M
+     * @param n     number of vectors
+     */
+    void perturb_codes(int32_t* codes, size_t n, std::mt19937& gen) const;
 
     /** Add some perturbation to codebooks
      *
@@ -118,12 +139,6 @@ struct LocalSearchQuantizer : AdditiveQuantizer {
             const std::vector<float>& stddev,
             std::mt19937& gen);
 
-    /** Add some perturbation to codes
-     *
-     * @param codes codes to be perturbed, size n * M
-     */
-    void perturb_codes(int32_t* codes, size_t n, std::mt19937& gen) const;
-
     /** Compute binary terms
      *
      * @param binaries binary terms, size M * M * K * K
@@ -132,6 +147,7 @@ struct LocalSearchQuantizer : AdditiveQuantizer {
 
     /** Compute unary terms
      *
+     * @param n       number of vectors
      * @param x       vectors to encode, size n * d
      * @param unaries unary terms, size n * M * K
      */
@@ -139,8 +155,9 @@ struct LocalSearchQuantizer : AdditiveQuantizer {
 
     /** Helper function to compute reconstruction error
      *
-     * @param x     vectors to encode, size n * d
      * @param codes encoded codes, size n * M
+     * @param x     vectors to encode, size n * d
+     * @param n     number of vectors
      * @param objs  if it is not null, store reconstruction
                     error of each vector into it, size n
      */
@@ -158,13 +175,49 @@ struct LocalSearchQuantizer : AdditiveQuantizer {
     void bruteforce_encode(const float* x, int32_t* codes, size_t n) const;
 };
 
+namespace lsq {
+
+struct IcmEncoder {
+    std::vector<float> binaries;
+
+    bool verbose;
+
+    const LocalSearchQuantizer* lsq;
+
+    explicit IcmEncoder(const LocalSearchQuantizer* lsq);
+
+    virtual ~IcmEncoder() {}
+
+    ///< compute binary terms
+    virtual void set_binary_term();
+
+    /** Encode vectors given codebooks
+     *
+     * @param codes     output codes, size n * M
+     * @param x         vectors to encode, size n * d
+     * @param gen       random generator
+     * @param n         number of vectors
+     * @param ils_iters number of iterations of iterative local search
+     */
+    virtual void encode(
+            int32_t* codes,
+            const float* x,
+            std::mt19937& gen,
+            size_t n,
+            size_t ils_iters) const;
+};
+
+struct IcmEncoderFactory {
+    virtual IcmEncoder* get(const LocalSearchQuantizer* lsq) {
+        return new IcmEncoder(lsq);
+    }
+};
+
 /** A helper struct to count consuming time during training.
  *  It is NOT thread-safe.
  */
 struct LSQTimer {
-    std::unordered_map<std::string, double> duration;
-    std::unordered_map<std::string, double> t0;
-    std::unordered_map<std::string, bool> started;
+    std::unordered_map<std::string, double> t;
 
     LSQTimer() {
         reset();
@@ -172,13 +225,24 @@ struct LSQTimer {
 
     double get(const std::string& name);
 
-    void start(const std::string& name);
-
-    void end(const std::string& name);
+    void add(const std::string& name, double delta);
 
     void reset();
 };
 
-FAISS_API extern LSQTimer lsq_timer; ///< timer to count consuming time
+struct LSQTimerScope {
+    double t0;
+    LSQTimer* timer;
+    std::string name;
+    bool finished;
+
+    LSQTimerScope(LSQTimer* timer, std::string name);
+
+    void finish();
+
+    ~LSQTimerScope();
+};
+
+} // namespace lsq
 
 } // namespace faiss
