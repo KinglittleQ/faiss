@@ -78,6 +78,7 @@ typedef uint64_t size_t;
 #include <faiss/IndexIVFFlat.h>
 
 #include <faiss/IndexAQFastScan.h>
+#include <faiss/IndexIVFAQFastScan.h>
 #include <faiss/IndexPQFastScan.h>
 #include <faiss/IndexIVFPQFastScan.h>
 #include <faiss/utils/quantize_lut.h>
@@ -435,6 +436,7 @@ void gpu_sync_all_devices()
 %include  <faiss/Index2Layer.h>
 
 %include  <faiss/IndexAQFastScan.h>
+%include  <faiss/IndexIVFAQFastScan.h>
 %include  <faiss/IndexPQFastScan.h>
 %include  <faiss/IndexIVFPQFastScan.h>
 %include  <faiss/utils/quantize_lut.h>
@@ -546,6 +548,7 @@ void gpu_sync_all_devices()
     DOWNCAST2 ( IndexReplicas, IndexReplicasTemplateT_faiss__Index_t )
     DOWNCAST ( IndexIVFPQR )
     DOWNCAST ( IndexIVFPQ )
+    DOWNCAST ( IndexIVFAQFastScan )
     DOWNCAST ( IndexIVFPQFastScan )
     DOWNCAST ( IndexIVFSpectralHash )
     DOWNCAST ( IndexIVFScalarQuantizer )
@@ -555,7 +558,7 @@ void gpu_sync_all_devices()
     DOWNCAST ( IndexFlat )
     DOWNCAST ( IndexRefineFlat )
     DOWNCAST ( IndexRefine )
-    // DOWNCAST ( IndexAQFastScan )
+    DOWNCAST ( IndexAQFastScan )
     DOWNCAST ( IndexPQFastScan )
     DOWNCAST ( IndexPQ )
     DOWNCAST ( IndexResidual )

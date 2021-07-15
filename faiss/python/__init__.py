@@ -157,6 +157,7 @@ def handle_Quantizer(the_class):
 
 handle_Quantizer(ProductQuantizer)
 handle_Quantizer(ScalarQuantizer)
+handle_Quantizer(AdditiveQuantizer)
 handle_Quantizer(ResidualQuantizer)
 handle_Quantizer(LocalSearchQuantizer)
 

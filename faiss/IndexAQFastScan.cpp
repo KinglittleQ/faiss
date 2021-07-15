@@ -233,7 +233,6 @@ void IndexAQFastScan::reset() {
 
 namespace {
 
-// from impl/ProductQuantizer.cpp
 template <class C, typename dis_t>
 void aq_estimators_from_tables_generic(
         const IndexAQFastScan& index,
