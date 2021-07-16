@@ -58,7 +58,16 @@ struct LocalSearchQuantizer : AdditiveQuantizer {
     int random_seed; ///< seed for random generator
     size_t nperts;   ///< number of perturbation in each code
 
-    char encode_type = 0; ///< 0 for icm, 1 for brute force
+    enum EncodeType {
+        EncodeType_ICM,  // icm
+        EncodeType_BF,   // brute force search
+    };
+
+    ///< encoding method in compute_codes()
+    EncodeType encode_type = EncodeType_ICM;
+
+    ///< encoding method in train()
+    EncodeType train_encode_type = EncodeType_ICM;
 
     ///< if non-NULL, use this encoder to encode
     lsq::IcmEncoderFactory* icm_encoder_factory;

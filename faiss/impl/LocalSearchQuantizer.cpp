@@ -256,10 +256,12 @@ void LocalSearchQuantizer::train(size_t n, const float* x) {
         }
 
         // refine codes
-        if (encode_type == 0) {
+        if (train_encode_type == EncodeType_ICM) {
             icm_encode(codes.data(),x,  n, train_ils_iters, gen);
-        } else {
+        } else if (train_encode_type == EncodeType_BF) {
             bruteforce_encode(codes.data(), x, n);
+        } else {
+            FAISS_THROW_MSG("invalid encode type");
         }
 
         if (verbose) {
@@ -318,10 +320,12 @@ void LocalSearchQuantizer::compute_codes(
     std::mt19937 gen(random_seed);
     random_int32(codes, 0, K - 1, gen);
 
-    if (encode_type == 0) {
+    if (encode_type == EncodeType_ICM) {
         icm_encode(codes.data(), x, n, encode_ils_iters, gen);
-    } else {
+    } else if (encode_type == EncodeType_BF) {
         bruteforce_encode(codes.data(), x, n);
+    } else {
+        FAISS_THROW_MSG("invalid encode type");
     }
 
     pack_codes(n, codes.data(), codes_out);

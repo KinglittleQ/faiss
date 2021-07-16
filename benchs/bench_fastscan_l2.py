@@ -59,21 +59,17 @@ M = vec_M + norm_M
 
 nbits = 4
 
+LSQ = faiss.LocalSearchQuantizer
 
 if 'lsq-lsq' in todo:
     lsq = faiss.LocalSearchQuantizer(d, vec_M, nbits)
-    lsq.lambd = 0.1
-    lsq.verbose = True
     ngpus = faiss.get_num_gpus()
     lsq.icm_encoder_factory = faiss.GpuIcmEncoderFactory(ngpus)
 
     norm_aq = faiss.LocalSearchQuantizer(1, norm_M, nbits)
-    # norm_aq.train_iters = 10
-    norm_aq.encode_type = 1
-    norm_aq.verbose = True
+    norm_aq.encode_type = LSQ.EncodeType_BF
 
     index = faiss.IndexAQFastScan(lsq, norm_aq, faiss.METRIC_L2)
-    # index.implem = 0x22
     index.implem = 12
     index.train(xt)
     index.add(xb)
@@ -81,11 +77,7 @@ if 'lsq-lsq' in todo:
 
 if 'lsq-rq' in todo:
     lsq = faiss.LocalSearchQuantizer(d, vec_M, nbits)
-    lsq.lambd = 0.1
-    lsq.verbose = True
-
     norm_aq = faiss.ResidualQuantizer(1, norm_M, nbits)
-    norm_aq.verbose = True
 
     index = faiss.IndexAQFastScan(lsq, norm_aq, faiss.METRIC_L2)
     # index.implem = 0x22
@@ -122,11 +114,7 @@ if 'rq-lsq' in todo:
     rq.verbose = True
 
     norm_aq = faiss.LocalSearchQuantizer(1, norm_M, nbits)
-    norm_aq.lambd = 0.01
-    norm_aq.train_iters = 10
-    norm_aq.encode_type = 1
-    norm_aq.p = 0.1
-    norm_aq.verbose = True
+    norm_aq.encode_type = LSQ.EncodeType_BF
 
     index = faiss.IndexAQFastScan(rq, norm_aq, faiss.METRIC_L2)
     index.implem = 12
