@@ -115,6 +115,9 @@ void IndexAQFastScan::train(idx_t n, const float* x) {
     if (is_trained) {
         return;
     }
+
+    aq->verbose = verbose;
+    norm_aq->verbose = verbose;
     aq->train(n, x);
 
     if (metric_type == METRIC_L2) {

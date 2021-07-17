@@ -62,7 +62,7 @@ IndexIVFAQFastScan::IndexIVFAQFastScan(
     M = aq->M + norm_aq->M;
     M2 = roundup(M, 2);
 
-    by_residual = true; // set to true by default because it's much accurate
+    by_residual = true; // set to true by default because it's more accurate
     is_trained = false;
     code_size = M2 / 2;
 
@@ -77,58 +77,6 @@ IndexIVFAQFastScan::IndexIVFAQFastScan() {
     bbs = 0;
     M2 = 0;
 }
-
-// IndexIVFAQFastScan::IndexIVFAQFastScan(const IndexIVFAQ& orig, int bbs)
-//         : IndexIVF(
-//                   orig.quantizer,
-//                   orig.d,
-//                   orig.nlist,
-//                   orig.pq.code_size,
-//                   orig.metric_type),
-//           pq(orig.pq),
-//           bbs(bbs) {
-//     FAISS_THROW_IF_NOT(orig.pq.nbits == 4);
-
-//     by_residual = orig.by_residual;
-//     ntotal = orig.ntotal;
-//     is_trained = orig.is_trained;
-//     nprobe = orig.nprobe;
-//     size_t M = pq.M;
-
-//     M2 = roundup(M, 2);
-
-//     replace_invlists(
-//             new BlockInvertedLists(orig.nlist, bbs, bbs * M2 / 2), true);
-
-//     precomputed_table.resize(orig.precomputed_table.size());
-
-//     if (precomputed_table.nbytes() > 0) {
-//         memcpy(precomputed_table.get(),
-//                orig.precomputed_table.data(),
-//                precomputed_table.nbytes());
-//     }
-
-//     for (size_t i = 0; i < nlist; i++) {
-//         size_t nb = orig.invlists->list_size(i);
-//         size_t nb2 = roundup(nb, bbs);
-//         AlignedTable<uint8_t> tmp(nb2 * M2 / 2);
-//         pq4_pack_codes(
-//                 InvertedLists::ScopedCodes(orig.invlists, i).get(),
-//                 nb,
-//                 M,
-//                 nb2,
-//                 bbs,
-//                 M2,
-//                 tmp.get());
-//         invlists->add_entries(
-//                 i,
-//                 nb,
-//                 InvertedLists::ScopedIds(orig.invlists, i).get(),
-//                 tmp.get());
-//     }
-
-//     orig_invlists = orig.invlists;
-// }
 
 /*********************************************************
  * Training

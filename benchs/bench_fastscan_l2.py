@@ -40,6 +40,39 @@ def evaluate(index):
         (t1 - t0) * 1000.0 / nq, k, recall))
 
 
+def create_aq(name, d, M, nbits):
+    if name == 'lsq':
+        aq = LSQ(d, M, nbits)
+        aq.icm_encoder_factory = faiss.GpuIcmEncoderFactory(ngpus)
+        if M <= 3:
+            aq.encode_type = LSQ.EncodeType_BF
+        else:
+            aq.encode_ils_iters = 64
+    elif name == 'rq':
+        aq = RQ(d, M, nbits)
+
+    return aq
+
+
+def create_aq_fastscan(name1, M1, name2, M2):
+    aq = create_aq(name1, d, M1, nbits)
+    norm_aq = create_aq(name2, 1, M2, nbits)
+    index = faiss.IndexAQFastScan(aq, norm_aq, faiss.METRIC_L2)
+
+    # do not release the memory
+    index.alloc_aq = aq
+    index.alloc_norm_aq = norm_aq
+
+    return index
+
+
+def is_aq_fastscan(s):
+    ss = s.split('-')
+    if len(ss) == 4:
+        return (ss[0] in ['rq', 'lsq']) and (ss[2] in ['rq', 'lsq'])
+    return False
+
+
 k = int(sys.argv[1])
 todo = sys.argv[2:]
 ds = DatasetSIFT1M()
@@ -53,38 +86,25 @@ nb, d = xb.shape
 nq, d = xq.shape
 nt, d = xt.shape
 
-vec_M = 14
-norm_M = 2
-M = vec_M + norm_M
-
+M = 16
 nbits = 4
 
 LSQ = faiss.LocalSearchQuantizer
+RQ = faiss.ResidualQuantizer
+ngpus = faiss.get_num_gpus()
 
-if 'lsq-lsq' in todo:
-    lsq = faiss.LocalSearchQuantizer(d, vec_M, nbits)
-    ngpus = faiss.get_num_gpus()
-    lsq.icm_encoder_factory = faiss.GpuIcmEncoderFactory(ngpus)
 
-    norm_aq = faiss.LocalSearchQuantizer(1, norm_M, nbits)
-    norm_aq.encode_type = LSQ.EncodeType_BF
+# lsq-lsq, lsq-rq, rq-lsq, rq-lsq
+for s in todo:
+    if is_aq_fastscan(s):
+        print(f'========== {s}')
+        ss = s.split('-')
+        index = create_aq_fastscan(ss[0], int(ss[1]), ss[2], int(ss[3]))
+        index.verbose = True
+        index.train(xt)
+        index.add(xb)
+        evaluate(index)
 
-    index = faiss.IndexAQFastScan(lsq, norm_aq, faiss.METRIC_L2)
-    index.implem = 12
-    index.train(xt)
-    index.add(xb)
-    evaluate(index)
-
-if 'lsq-rq' in todo:
-    lsq = faiss.LocalSearchQuantizer(d, vec_M, nbits)
-    norm_aq = faiss.ResidualQuantizer(1, norm_M, nbits)
-
-    index = faiss.IndexAQFastScan(lsq, norm_aq, faiss.METRIC_L2)
-    # index.implem = 0x22
-    index.implem = 12
-    index.train(xt)
-    index.add(xb)
-    evaluate(index)
 
 if 'pq' in todo:
     index0 = faiss.IndexPQ(d, M, nbits, faiss.METRIC_L2)
@@ -96,38 +116,6 @@ if 'pq' in todo:
     eval_quantizer(index.pq, xb, xt, "pq")
     evaluate(index)
 
-if 'rq-rq' in todo:
-    rq = faiss.ResidualQuantizer(d, vec_M, nbits)
-    rq.verbose = True
-
-    norm_aq = faiss.ResidualQuantizer(1, norm_M, nbits)
-    norm_aq.verbose = True
-
-    index = faiss.IndexAQFastScan(rq, norm_aq, faiss.METRIC_L2)
-    index.implem = 12
-    index.train(xt)
-    index.add(xb)
-    evaluate(index)
-
-if 'rq-lsq' in todo:
-    rq = faiss.ResidualQuantizer(d, vec_M, nbits)
-    rq.verbose = True
-
-    norm_aq = faiss.LocalSearchQuantizer(1, norm_M, nbits)
-    norm_aq.encode_type = LSQ.EncodeType_BF
-
-    index = faiss.IndexAQFastScan(rq, norm_aq, faiss.METRIC_L2)
-    index.implem = 12
-    index.train(xt)
-    index.add(xb)
-    evaluate(index)
-
-if 'index-rq' in todo:
-    index = faiss.IndexResidual(d, vec_M, nbits)
-    index.verbose = True
-    index.train(xt)
-    index.add(xb)
-    evaluate(index)
 
 if 'pq-8' in todo:
     index = faiss.IndexPQ(d, M // 2, nbits * 2, faiss.METRIC_L2)
